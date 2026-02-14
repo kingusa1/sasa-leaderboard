@@ -1,4 +1,7 @@
 import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { processChatQuery } from '@/lib/ai-agent';
+import { setOpenRouterKey } from '@/lib/openrouter-auth';
 
 export async function POST(req: Request) {
   try {
@@ -8,26 +11,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Message is required' }, { status: 400 });
     }
 
-    const webhookUrl = process.env.N8N_WEBHOOK_URL;
-    if (!webhookUrl) {
-      return NextResponse.json(
-        { reply: "AI agent is not configured yet. Please set the N8N_WEBHOOK_URL in the environment variables." },
-        { status: 200 }
-      );
+    // Restore OAuth key from cookie (serverless functions are stateless)
+    const cookieStore = await cookies();
+    const oauthKey = cookieStore.get('openrouter_oauth_key')?.value;
+    if (oauthKey) {
+      setOpenRouterKey(oauthKey);
     }
 
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`n8n webhook returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    return NextResponse.json({ reply: data.output || data.response || data.text || data.message || JSON.stringify(data) });
+    const reply = await processChatQuery(message);
+    return NextResponse.json({ reply });
   } catch (error: any) {
     console.error('Chat API error:', error);
     return NextResponse.json(

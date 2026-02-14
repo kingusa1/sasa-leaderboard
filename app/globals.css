@@ -150,6 +150,10 @@ body {
 .medal-silver { color: #C0C0C0; }
 .medal-bronze { color: #CD7F32; }
 
+/* Hide scrollbar for filter tabs */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Live indicator */
 .live-dot {
   width: 8px;

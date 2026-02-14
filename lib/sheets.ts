@@ -1,7 +1,7 @@
 import { google } from 'googleapis';
 
 const SHEET_IDS = {
-  '1month': process.env.SHEET_ID_1M!,
+  '12month': process.env.SHEET_ID_1M!,
   '3month': process.env.SHEET_ID_3M!,
   '6month': process.env.SHEET_ID_6M!,
 };
@@ -26,11 +26,23 @@ export interface VoucherRow {
   dateAssigned: string;
 }
 
+export type PlanKey = '12month' | '3month' | '6month';
+
 export interface SalespersonStats {
   name: string;
   total: number;
-  byPlan: { '1month': number; '3month': number; '6month': number };
-  clients: { name: string; date: string; plan: string }[];
+  byPlan: Record<PlanKey, number>;
+  clients: { name: string; date: string; plan: PlanKey; phone: string; email: string }[];
+  rank?: number;
+  conversionRate?: number;
+}
+
+export interface PlanStats {
+  total: number;
+  assigned: number;
+  available: number;
+  compromised: number;
+  other: number;
 }
 
 export interface SheetSummary {
@@ -40,8 +52,11 @@ export interface SheetSummary {
     assigned: number;
     available: number;
     compromised: number;
-    byPlan: { '1month': { total: number; assigned: number }; '3month': { total: number; assigned: number }; '6month': { total: number; assigned: number } };
+    other: number;
+    totalSalespeople: number;
+    byPlan: Record<PlanKey, PlanStats>;
   };
+  recentAssignments: { name: string; client: string; plan: PlanKey; date: string }[];
   lastUpdated: string;
 }
 
@@ -72,16 +87,25 @@ function normalizeName(name: string): string {
     .join(' ');
 }
 
+function getPlanStats(rows: VoucherRow[]): PlanStats {
+  const assigned = rows.filter((r) => r.status === 'assigned').length;
+  const available = rows.filter((r) => r.status === 'available').length;
+  const compromised = rows.filter((r) => r.status === 'compromised').length;
+  const other = rows.length - assigned - available - compromised;
+  return { total: rows.length, assigned, available, compromised, other };
+}
+
 export async function getLeaderboardData(): Promise<SheetSummary> {
-  const [data1m, data3m, data6m] = await Promise.all([
-    fetchSheetData(SHEET_IDS['1month']),
+  const [data12m, data3m, data6m] = await Promise.all([
+    fetchSheetData(SHEET_IDS['12month']),
     fetchSheetData(SHEET_IDS['3month']),
     fetchSheetData(SHEET_IDS['6month']),
   ]);
 
   const salesMap = new Map<string, SalespersonStats>();
+  const recentAssignments: SheetSummary['recentAssignments'] = [];
 
-  function processRows(rows: VoucherRow[], plan: '1month' | '3month' | '6month') {
+  function processRows(rows: VoucherRow[], plan: PlanKey) {
     for (const row of rows) {
       if (!row.salesPerson) continue;
       const name = normalizeName(row.salesPerson);
@@ -89,7 +113,7 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
         salesMap.set(name, {
           name,
           total: 0,
-          byPlan: { '1month': 0, '3month': 0, '6month': 0 },
+          byPlan: { '12month': 0, '3month': 0, '6month': 0 },
           clients: [],
         });
       }
@@ -97,53 +121,57 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
       stats.total++;
       stats.byPlan[plan]++;
       if (row.clientName) {
-        stats.clients.push({ name: row.clientName, date: row.dateAssigned, plan });
+        stats.clients.push({
+          name: row.clientName,
+          date: row.dateAssigned,
+          plan,
+          phone: row.clientPhone,
+          email: row.clientEmail,
+        });
+        recentAssignments.push({
+          name,
+          client: row.clientName,
+          plan,
+          date: row.dateAssigned,
+        });
       }
     }
   }
 
-  processRows(data1m, '1month');
+  processRows(data12m, '12month');
   processRows(data3m, '3month');
   processRows(data6m, '6month');
 
-  const leaderboard = Array.from(salesMap.values()).sort((a, b) => b.total - a.total);
+  const leaderboard = Array.from(salesMap.values())
+    .sort((a, b) => b.total - a.total)
+    .map((p, i) => ({ ...p, rank: i + 1 }));
 
-  const countStatus = (rows: VoucherRow[], status: string) =>
-    rows.filter((r) => r.status === status).length;
+  const plan12 = getPlanStats(data12m);
+  const plan3 = getPlanStats(data3m);
+  const plan6 = getPlanStats(data6m);
 
   const totals = {
-    totalVouchers: data1m.length + data3m.length + data6m.length,
-    assigned:
-      countStatus(data1m, 'assigned') +
-      countStatus(data3m, 'assigned') +
-      countStatus(data6m, 'assigned'),
-    available:
-      countStatus(data1m, 'available') +
-      countStatus(data3m, 'available') +
-      countStatus(data6m, 'available'),
-    compromised:
-      countStatus(data1m, 'compromised') +
-      countStatus(data3m, 'compromised') +
-      countStatus(data6m, 'compromised'),
-    byPlan: {
-      '1month': {
-        total: data1m.length,
-        assigned: countStatus(data1m, 'assigned'),
-      },
-      '3month': {
-        total: data3m.length,
-        assigned: countStatus(data3m, 'assigned'),
-      },
-      '6month': {
-        total: data6m.length,
-        assigned: countStatus(data6m, 'assigned'),
-      },
-    },
+    totalVouchers: data12m.length + data3m.length + data6m.length,
+    assigned: plan12.assigned + plan3.assigned + plan6.assigned,
+    available: plan12.available + plan3.available + plan6.available,
+    compromised: plan12.compromised + plan3.compromised + plan6.compromised,
+    other: plan12.other + plan3.other + plan6.other,
+    totalSalespeople: leaderboard.length,
+    byPlan: { '12month': plan12, '3month': plan3, '6month': plan6 },
   };
+
+  // Sort recent assignments by date (newest first)
+  recentAssignments.sort((a, b) => {
+    if (!a.date && !b.date) return 0;
+    if (!a.date) return 1;
+    if (!b.date) return -1;
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
 
   return {
     leaderboard,
     totals,
+    recentAssignments: recentAssignments.slice(0, 20),
     lastUpdated: new Date().toISOString(),
   };
 }
