@@ -4,16 +4,17 @@ import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
 import Leaderboard from '@/components/Leaderboard';
 import ChatWidget from '@/components/ChatWidget';
+import LockScreen from '@/components/LockScreen';
 import type { SheetSummary } from '@/lib/sheets';
 
-const REFRESH_INTERVAL = 30000; // 30 seconds
+const REFRESH_INTERVAL = 10000; // 10 seconds
 
 export default function Home() {
   const [data, setData] = useState<SheetSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(10);
 
   const fetchData = useCallback(async () => {
     try {
@@ -23,7 +24,7 @@ export default function Home() {
       setData(json);
       setError(null);
       setLastRefresh(new Date());
-      setCountdown(30);
+      setCountdown(10);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -41,12 +42,13 @@ export default function Home() {
   // Countdown timer
   useEffect(() => {
     const timer = setInterval(() => {
-      setCountdown((prev) => (prev <= 1 ? 30 : prev - 1));
+      setCountdown((prev) => (prev <= 1 ? 10 : prev - 1));
     }, 1000);
     return () => clearInterval(timer);
   }, []);
 
   return (
+    <LockScreen>
     <div className="min-h-screen pb-20">
       {/* Header */}
       <header className="bg-navy-700 text-white sticky top-0 z-40 shadow-navy">
@@ -113,5 +115,6 @@ export default function Home() {
       {/* WhatsApp-style Chat */}
       <ChatWidget />
     </div>
+    </LockScreen>
   );
 }

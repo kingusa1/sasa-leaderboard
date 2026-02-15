@@ -32,7 +32,7 @@ export interface SalespersonStats {
   name: string;
   total: number;
   byPlan: Record<PlanKey, number>;
-  clients: { name: string; date: string; plan: PlanKey; phone: string; email: string }[];
+  clients: { name: string; code: string; date: string; plan: PlanKey; phone: string; email: string }[];
   rank?: number;
   conversionRate?: number;
 }
@@ -80,6 +80,19 @@ async function fetchSheetData(sheetId: string): Promise<VoucherRow[]> {
   }));
 }
 
+function parseDateStr(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  const parts = dateStr.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    }
+    return new Date(Number(parts[2]), Number(parts[0]) - 1, Number(parts[1]));
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 function normalizeName(name: string): string {
   return name
     .split(' ')
@@ -107,7 +120,7 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
 
   function processRows(rows: VoucherRow[], plan: PlanKey) {
     for (const row of rows) {
-      if (!row.salesPerson) continue;
+      if (!row.salesPerson || !row.clientName) continue;
       const name = normalizeName(row.salesPerson);
       if (!salesMap.has(name)) {
         salesMap.set(name, {
@@ -120,21 +133,20 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
       const stats = salesMap.get(name)!;
       stats.total++;
       stats.byPlan[plan]++;
-      if (row.clientName) {
-        stats.clients.push({
-          name: row.clientName,
-          date: row.dateAssigned,
-          plan,
-          phone: row.clientPhone,
-          email: row.clientEmail,
-        });
-        recentAssignments.push({
-          name,
-          client: row.clientName,
-          plan,
-          date: row.dateAssigned,
-        });
-      }
+      stats.clients.push({
+        name: row.clientName,
+        code: row.code,
+        date: row.dateAssigned,
+        plan,
+        phone: row.clientPhone,
+        email: row.clientEmail,
+      });
+      recentAssignments.push({
+        name,
+        client: row.clientName,
+        plan,
+        date: row.dateAssigned,
+      });
     }
   }
 
@@ -165,7 +177,12 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
     if (!a.date && !b.date) return 0;
     if (!a.date) return 1;
     if (!b.date) return -1;
-    return new Date(b.date).getTime() - new Date(a.date).getTime();
+    const dateA = parseDateStr(a.date);
+    const dateB = parseDateStr(b.date);
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return 1;
+    if (!dateB) return -1;
+    return dateB.getTime() - dateA.getTime();
   });
 
   return {

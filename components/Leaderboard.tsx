@@ -1,7 +1,59 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { SheetSummary, SalespersonStats, PlanKey } from '@/lib/sheets';
+
+// Copy to clipboard with visual feedback
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      const input = document.createElement('input');
+      input.value = text;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold transition-all active:scale-95 flex-shrink-0 ${
+        copied
+          ? 'bg-green-100 text-green-700'
+          : 'bg-navy-50 text-navy-600 hover:bg-navy-100 active:bg-navy-200'
+      }`}
+      title="Tap to copy voucher code"
+    >
+      {copied ? (
+        <>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+          Copied!
+        </>
+      ) : (
+        <>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {text}
+        </>
+      )}
+    </button>
+  );
+}
 
 const PLAN_LABELS: Record<PlanKey, string> = {
   '12month': '12 Months',
@@ -32,6 +84,82 @@ const PLAN_RING_COLORS: Record<PlanKey, string> = {
   '3month': '#3b82f6',
   '6month': '#8b5cf6',
 };
+
+type TimePeriod = 'today' | 'week' | 'month' | 'all';
+
+const TIME_LABELS: Record<TimePeriod, string> = {
+  today: 'Today',
+  week: 'This Week',
+  month: 'This Month',
+  all: 'All Time',
+};
+
+const TIME_ICONS: Record<TimePeriod, string> = {
+  today: '📅',
+  week: '📆',
+  month: '🗓️',
+  all: '🏆',
+};
+
+function parseDate(dateStr: string): Date | null {
+  if (!dateStr) return null;
+  // Handle common formats: M/D/YYYY, MM/DD/YYYY, YYYY-MM-DD, D/M/YYYY
+  const parts = dateStr.split(/[\/\-\.]/);
+  if (parts.length === 3) {
+    // If first part is 4 digits, it's YYYY-MM-DD
+    if (parts[0].length === 4) {
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    }
+    // Otherwise M/D/YYYY
+    return new Date(Number(parts[2]), Number(parts[0]) - 1, Number(parts[1]));
+  }
+  // Fallback
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function isInTimePeriod(dateStr: string, period: TimePeriod): boolean {
+  if (period === 'all') return true;
+  const date = parseDate(dateStr);
+  if (!date) return false;
+
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  if (period === 'today') {
+    return date >= startOfDay;
+  }
+  if (period === 'week') {
+    const day = now.getDay();
+    const startOfWeek = new Date(startOfDay);
+    startOfWeek.setDate(startOfWeek.getDate() - day);
+    return date >= startOfWeek;
+  }
+  if (period === 'month') {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    return date >= startOfMonth;
+  }
+  return true;
+}
+
+function filterByTimePeriod(leaderboard: SalespersonStats[], period: TimePeriod): SalespersonStats[] {
+  if (period === 'all') return leaderboard;
+
+  return leaderboard
+    .map((person) => {
+      const filteredClients = person.clients.filter((c) => isInTimePeriod(c.date, period));
+      const byPlan: Record<PlanKey, number> = { '12month': 0, '3month': 0, '6month': 0 };
+      filteredClients.forEach((c) => { byPlan[c.plan]++; });
+      return {
+        ...person,
+        total: filteredClients.length,
+        byPlan,
+        clients: filteredClients,
+      };
+    })
+    .filter((p) => p.total > 0)
+    .sort((a, b) => b.total - a.total);
+}
 
 function getInitials(name: string) {
   return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
@@ -318,21 +446,24 @@ function LeaderboardRow({
                 Clients ({person.clients.length})
               </div>
               <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                {person.clients
+                {[...person.clients]
                   .sort((a, b) => {
-                    if (!a.date && !b.date) return 0;
-                    if (!a.date) return 1;
-                    if (!b.date) return -1;
-                    return new Date(b.date).getTime() - new Date(a.date).getTime();
+                    const da = parseDate(a.date);
+                    const db = parseDate(b.date);
+                    if (!da && !db) return 0;
+                    if (!da) return 1;
+                    if (!db) return -1;
+                    return db.getTime() - da.getTime();
                   })
                   .slice(0, 15)
                   .map((c, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-1.5"
+                      className="flex items-center gap-2 text-xs bg-gray-50 rounded-lg px-2.5 py-2"
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${PLAN_COLORS[c.plan]} flex-shrink-0`} />
                       <span className="text-navy-700 font-medium truncate flex-1">{c.name}</span>
+                      {c.code && <CopyButton text={c.code} />}
                       <span
                         className={`text-[9px] px-1.5 py-0.5 rounded-full ${PLAN_BG_COLORS[c.plan]} ${PLAN_TEXT_COLORS[c.plan]} font-medium flex-shrink-0`}
                       >
@@ -393,13 +524,21 @@ function ActivityFeed({ assignments }: { assignments: SheetSummary['recentAssign
 export default function Leaderboard({ data }: { data: SheetSummary }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [filter, setFilter] = useState<'all' | PlanKey>('all');
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
   const [activeTab, setActiveTab] = useState<'rankings' | 'activity'>('rankings');
 
+  // First filter by time period, then by plan
+  const timeFiltered = filterByTimePeriod(data.leaderboard, timePeriod);
   const filteredLeaderboard =
     filter === 'all'
-      ? data.leaderboard
-      : data.leaderboard
-          .map((p) => ({ ...p, total: p.byPlan[filter] }))
+      ? timeFiltered
+      : timeFiltered
+          .map((p) => {
+            const planClients = p.clients.filter((c) => c.plan === filter);
+            const byPlan: Record<PlanKey, number> = { '12month': 0, '3month': 0, '6month': 0 };
+            byPlan[filter] = planClients.length;
+            return { ...p, total: planClients.length, byPlan, clients: planClients };
+          })
           .filter((p) => p.total > 0)
           .sort((a, b) => b.total - a.total);
 
@@ -505,7 +644,45 @@ export default function Leaderboard({ data }: { data: SheetSummary }) {
 
       {activeTab === 'rankings' ? (
         <>
-          {/* Filter Tabs */}
+          {/* Time Period Selector */}
+          <div className="bg-white rounded-2xl shadow-card p-1.5">
+            <div className="grid grid-cols-4 gap-1">
+              {(['today', 'week', 'month', 'all'] as TimePeriod[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => { setTimePeriod(t); setExpandedIdx(null); }}
+                  className={`py-2 px-1 rounded-xl text-center transition-all ${
+                    timePeriod === t
+                      ? 'bg-navy-600 text-white shadow-navy'
+                      : 'text-gray-500 hover:bg-navy-50'
+                  }`}
+                >
+                  <div className="text-sm leading-none mb-0.5">{TIME_ICONS[t]}</div>
+                  <div className="text-[10px] font-semibold leading-tight">{TIME_LABELS[t]}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Time period summary */}
+          {timePeriod !== 'all' && (
+            <div className="bg-gradient-to-r from-navy-50 to-blue-50 rounded-xl px-4 py-2.5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-semibold text-navy-700">{TIME_LABELS[timePeriod]} Rankings</span>
+                <span className="text-[10px] text-gray-500 ml-2">
+                  {filteredLeaderboard.length} active {filteredLeaderboard.length === 1 ? 'agent' : 'agents'}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-lg font-black text-navy-700">
+                  {filteredLeaderboard.reduce((sum, p) => sum + p.total, 0)}
+                </span>
+                <span className="text-[10px] text-gray-500 ml-1">sales</span>
+              </div>
+            </div>
+          )}
+
+          {/* Plan Filter Tabs */}
           <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar">
             {(['all', '12month', '6month', '3month'] as const).map((f) => (
               <button
