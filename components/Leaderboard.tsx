@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { SheetSummary, SalespersonStats, PlanKey } from '@/lib/sheets';
+import CashProcessForm from '@/components/CashProcessForm';
 
 // Copy to clipboard with visual feedback
 function CopyButton({ text }: { text: string }) {
@@ -463,6 +464,11 @@ function LeaderboardRow({
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${PLAN_COLORS[c.plan]} flex-shrink-0`} />
                       <span className="text-navy-700 font-medium truncate flex-1">{c.name}</span>
+                      {c.source === 'cash' && (
+                        <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold uppercase tracking-wider flex-shrink-0 border border-amber-200">
+                          Cash
+                        </span>
+                      )}
                       {c.code && <CopyButton text={c.code} />}
                       <span
                         className={`text-[9px] px-1.5 py-0.5 rounded-full ${PLAN_BG_COLORS[c.plan]} ${PLAN_TEXT_COLORS[c.plan]} font-medium flex-shrink-0`}
@@ -511,6 +517,11 @@ function ActivityFeed({ assignments }: { assignments: SheetSummary['recentAssign
                 <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${PLAN_BG_COLORS[a.plan]} ${PLAN_TEXT_COLORS[a.plan]} font-medium`}>
                   {PLAN_LABELS[a.plan]}
                 </span>
+                {a.source === 'cash' && (
+                  <span className="text-[8px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 font-bold uppercase border border-amber-200">
+                    Cash
+                  </span>
+                )}
                 {a.date && <span className="text-gray-400 text-[10px]">{a.date}</span>}
               </div>
             </div>
@@ -521,11 +532,11 @@ function ActivityFeed({ assignments }: { assignments: SheetSummary['recentAssign
   );
 }
 
-export default function Leaderboard({ data }: { data: SheetSummary }) {
+export default function Leaderboard({ data, onCashSuccess }: { data: SheetSummary; onCashSuccess?: () => void }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [filter, setFilter] = useState<'all' | PlanKey>('all');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
-  const [activeTab, setActiveTab] = useState<'rankings' | 'activity'>('rankings');
+  const [activeTab, setActiveTab] = useState<'rankings' | 'activity' | 'cash'>('rankings');
 
   // First filter by time period, then by plan
   const timeFiltered = filterByTimePeriod(data.leaderboard, timePeriod);
@@ -640,6 +651,16 @@ export default function Leaderboard({ data }: { data: SheetSummary }) {
         >
           Activity Feed
         </button>
+        <button
+          onClick={() => setActiveTab('cash')}
+          className={`flex-1 py-2 rounded-lg text-xs font-semibold transition-all ${
+            activeTab === 'cash'
+              ? 'bg-emerald-600 text-white shadow-md'
+              : 'text-gray-500 hover:text-emerald-600'
+          }`}
+        >
+          Cash Process
+        </button>
       </div>
 
       {activeTab === 'rankings' ? (
@@ -725,8 +746,15 @@ export default function Leaderboard({ data }: { data: SheetSummary }) {
             </div>
           )}
         </>
-      ) : (
+      ) : activeTab === 'activity' ? (
         <ActivityFeed assignments={data.recentAssignments} />
+      ) : (
+        <div className="bg-white rounded-2xl shadow-card p-4 sm:p-5">
+          <CashProcessForm
+            onSuccess={() => { onCashSuccess?.(); }}
+            salespeople={data.leaderboard.map((p) => p.name)}
+          />
+        </div>
       )}
     </div>
   );

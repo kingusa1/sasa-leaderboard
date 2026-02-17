@@ -15,7 +15,6 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [countdown, setCountdown] = useState(10);
-
   const fetchData = useCallback(async () => {
     try {
       const res = await fetch('/api/sheets', { cache: 'no-store' });
@@ -108,7 +107,7 @@ export default function Home() {
             </button>
           </div>
         ) : data ? (
-          <Leaderboard data={data} />
+          <Leaderboard data={data} onCashSuccess={fetchData} />
         ) : null}
       </div>
 
