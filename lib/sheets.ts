@@ -151,7 +151,8 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
   const all6m = [...data6m, ...cashData6m];
 
   const salesMap = new Map<string, SalespersonStats>();
-  const recentAssignments: SheetSummary['recentAssignments'] = [];
+  const allAssignments: { name: string; client: string; plan: PlanKey; date: string; source: 'regular' | 'cash'; order: number }[] = [];
+  let orderCounter = 0;
 
   function processRows(rows: VoucherRow[], plan: PlanKey) {
     for (const row of rows) {
@@ -177,12 +178,13 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
         email: row.clientEmail,
         source: row.source,
       });
-      recentAssignments.push({
+      allAssignments.push({
         name,
         client: row.clientName,
         plan,
         date: row.dateAssigned,
         source: row.source,
+        order: orderCounter++,
       });
     }
   }
@@ -209,18 +211,17 @@ export async function getLeaderboardData(): Promise<SheetSummary> {
     byPlan: { '12month': plan12, '3month': plan3, '6month': plan6 },
   };
 
-  // Sort recent assignments by date (newest first)
-  recentAssignments.sort((a, b) => {
-    if (!a.date && !b.date) return 0;
-    if (!a.date) return 1;
-    if (!b.date) return -1;
+  // Sort by date (newest first), then by row order (latest added first) for same date
+  allAssignments.sort((a, b) => {
     const dateA = parseDateStr(a.date);
     const dateB = parseDateStr(b.date);
-    if (!dateA && !dateB) return 0;
-    if (!dateA) return 1;
-    if (!dateB) return -1;
-    return dateB.getTime() - dateA.getTime();
+    const timeA = dateA ? dateA.getTime() : 0;
+    const timeB = dateB ? dateB.getTime() : 0;
+    if (timeA !== timeB) return timeB - timeA;
+    return b.order - a.order;
   });
+
+  const recentAssignments = allAssignments.map(({ order, ...rest }) => rest);
 
   const result: SheetSummary = {
     leaderboard,
