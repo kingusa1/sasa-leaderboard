@@ -86,13 +86,14 @@ const PLAN_RING_COLORS: Record<PlanKey, string> = {
   '6month': '#8b5cf6',
 };
 
-type TimePeriod = 'today' | 'week' | 'month' | 'all';
+type TimePeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
 const TIME_LABELS: Record<TimePeriod, string> = {
   today: 'Today',
   week: 'This Week',
   month: 'This Month',
   all: 'All Time',
+  custom: 'Custom',
 };
 
 const TIME_ICONS: Record<TimePeriod, string> = {
@@ -100,7 +101,14 @@ const TIME_ICONS: Record<TimePeriod, string> = {
   week: '📆',
   month: '🗓️',
   all: '🏆',
+  custom: '🔍',
 };
+
+function formatDisplayDate(isoStr: string): string {
+  if (!isoStr) return '';
+  const [y, m, d] = isoStr.split('-');
+  return `${Number(m)}/${Number(d)}/${y}`;
+}
 
 function parseDate(dateStr: string): Date | null {
   if (!dateStr) return null;
@@ -119,10 +127,17 @@ function parseDate(dateStr: string): Date | null {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function isInTimePeriod(dateStr: string, period: TimePeriod): boolean {
+function isInTimePeriod(dateStr: string, period: TimePeriod, customStart?: Date | null, customEnd?: Date | null): boolean {
   if (period === 'all') return true;
   const date = parseDate(dateStr);
   if (!date) return false;
+
+  if (period === 'custom') {
+    if (!customStart || !customEnd) return false;
+    const startOfRange = new Date(customStart.getFullYear(), customStart.getMonth(), customStart.getDate());
+    const endOfRange = new Date(customEnd.getFullYear(), customEnd.getMonth(), customEnd.getDate(), 23, 59, 59, 999);
+    return date >= startOfRange && date <= endOfRange;
+  }
 
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -143,12 +158,12 @@ function isInTimePeriod(dateStr: string, period: TimePeriod): boolean {
   return true;
 }
 
-function filterByTimePeriod(leaderboard: SalespersonStats[], period: TimePeriod): SalespersonStats[] {
+function filterByTimePeriod(leaderboard: SalespersonStats[], period: TimePeriod, customStart?: Date | null, customEnd?: Date | null): SalespersonStats[] {
   if (period === 'all') return leaderboard;
 
   return leaderboard
     .map((person) => {
-      const filteredClients = person.clients.filter((c) => isInTimePeriod(c.date, period));
+      const filteredClients = person.clients.filter((c) => isInTimePeriod(c.date, period, customStart, customEnd));
       const byPlan: Record<PlanKey, number> = { '12month': 0, '3month': 0, '6month': 0 };
       filteredClients.forEach((c) => { byPlan[c.plan]++; });
       return {
@@ -537,9 +552,16 @@ export default function Leaderboard({ data, onCashSuccess }: { data: SheetSummar
   const [filter, setFilter] = useState<'all' | PlanKey>('all');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('all');
   const [activeTab, setActiveTab] = useState<'rankings' | 'activity' | 'cash'>('rankings');
+  const todayISO = new Date().toISOString().split('T')[0];
+  const [customDateStart, setCustomDateStart] = useState<string>(todayISO);
+  const [customDateEnd, setCustomDateEnd] = useState<string>(todayISO);
+
+  // Parse custom dates for filtering
+  const parsedCustomStart = customDateStart ? new Date(customDateStart + 'T00:00:00') : null;
+  const parsedCustomEnd = customDateEnd ? new Date(customDateEnd + 'T23:59:59') : null;
 
   // First filter by time period, then by plan
-  const timeFiltered = filterByTimePeriod(data.leaderboard, timePeriod);
+  const timeFiltered = filterByTimePeriod(data.leaderboard, timePeriod, parsedCustomStart, parsedCustomEnd);
   const filteredLeaderboard =
     filter === 'all'
       ? timeFiltered
@@ -667,8 +689,8 @@ export default function Leaderboard({ data, onCashSuccess }: { data: SheetSummar
         <>
           {/* Time Period Selector */}
           <div className="bg-white rounded-2xl shadow-card p-1.5">
-            <div className="grid grid-cols-4 gap-1">
-              {(['today', 'week', 'month', 'all'] as TimePeriod[]).map((t) => (
+            <div className="grid grid-cols-5 gap-1">
+              {(['today', 'week', 'month', 'all', 'custom'] as TimePeriod[]).map((t) => (
                 <button
                   key={t}
                   onClick={() => { setTimePeriod(t); setExpandedIdx(null); }}
@@ -685,11 +707,67 @@ export default function Leaderboard({ data, onCashSuccess }: { data: SheetSummar
             </div>
           </div>
 
+          {/* Custom date range picker */}
+          {timePeriod === 'custom' && (
+            <div className="bg-white rounded-2xl shadow-card p-4">
+              <div className="text-[10px] text-gray-500 font-semibold uppercase tracking-wider mb-3">Select Date Range</div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] text-navy-600 font-medium mb-1 block">From</label>
+                  <input
+                    type="date"
+                    value={customDateStart}
+                    onChange={(e) => {
+                      setCustomDateStart(e.target.value);
+                      if (customDateEnd && e.target.value > customDateEnd) {
+                        setCustomDateEnd(e.target.value);
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm text-navy-700 focus:outline-none focus:ring-2 focus:ring-navy-500 focus:border-transparent bg-navy-50/50"
+                  />
+                </div>
+                <div className="text-gray-300 mt-5">—</div>
+                <div className="flex-1">
+                  <label className="text-[10px] text-navy-600 font-medium mb-1 block">To</label>
+                  <input
+                    type="date"
+                    value={customDateEnd}
+                    min={customDateStart}
+                    onChange={(e) => setCustomDateEnd(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm text-navy-700 focus:outline-none focus:ring-2 focus:ring-navy-500 focus:border-transparent bg-navy-50/50"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-1.5 mt-3">
+                {[
+                  { label: 'Today', fn: () => { setCustomDateStart(todayISO); setCustomDateEnd(todayISO); } },
+                  { label: 'Last 7 days', fn: () => { const d = new Date(); d.setDate(d.getDate() - 7); setCustomDateStart(d.toISOString().split('T')[0]); setCustomDateEnd(todayISO); } },
+                  { label: 'Last 30 days', fn: () => { const d = new Date(); d.setDate(d.getDate() - 30); setCustomDateStart(d.toISOString().split('T')[0]); setCustomDateEnd(todayISO); } },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={preset.fn}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-semibold bg-navy-50 text-navy-600 hover:bg-navy-100 active:bg-navy-200 transition-all active:scale-95"
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Time period summary */}
           {timePeriod !== 'all' && (
             <div className="bg-gradient-to-r from-navy-50 to-blue-50 rounded-xl px-4 py-2.5 flex items-center justify-between">
               <div>
-                <span className="text-xs font-semibold text-navy-700">{TIME_LABELS[timePeriod]} Rankings</span>
+                <span className="text-xs font-semibold text-navy-700">
+                  {timePeriod === 'custom'
+                    ? customDateStart === customDateEnd
+                      ? `${formatDisplayDate(customDateStart)} Rankings`
+                      : `${formatDisplayDate(customDateStart)} — ${formatDisplayDate(customDateEnd)}`
+                    : `${TIME_LABELS[timePeriod]} Rankings`
+                  }
+                </span>
                 <span className="text-[10px] text-gray-500 ml-2">
                   {filteredLeaderboard.length} active {filteredLeaderboard.length === 1 ? 'agent' : 'agents'}
                 </span>
